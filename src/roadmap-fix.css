@@ -1,0 +1,11 @@
+.roadmap-table tr.completed .plan-name-input{text-decoration:line-through;color:var(--muted)}
+.phase-number{display:inline-grid;place-items:center;min-width:34px;max-width:110px;width:auto;height:auto;min-height:28px;padding:4px 8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.plan-name-input{width:100%;min-width:170px;border:1px solid transparent;background:transparent;border-radius:8px;padding:7px 8px;font-size:12px;font-weight:700;transition:.18s}
+.plan-name-input:hover{background:rgba(255,255,255,.55);border-color:rgba(95,125,109,.14)}
+.plan-name-input:focus{background:rgba(255,255,255,.9);border-color:rgba(71,112,93,.32);box-shadow:0 0 0 3px rgba(71,112,93,.08);outline:0}
+.type-input{width:112px;border:1px solid transparent;border-radius:999px;padding:5px 10px;background:#e4ebf1;color:#587185;font-size:10px;font-weight:700;outline:0}
+.type-input:hover,.type-input:focus{background:rgba(255,255,255,.9);border-color:rgba(88,113,133,.25);box-shadow:0 0 0 3px rgba(88,113,133,.07)}
+.fraction-input{width:96px;border:1px solid rgba(87,117,101,.18);border-radius:9px;padding:7px 8px;background:rgba(255,255,255,.62);font-size:11px;text-align:center;outline:0}
+.fraction-input:focus{border-color:rgba(71,112,93,.42);box-shadow:0 0 0 3px rgba(71,112,93,.08)}
+.auto-progress{display:grid;grid-template-columns:minmax(80px,1fr) 34px;align-items:center;gap:8px}.auto-progress>div{height:7px;border-radius:99px;background:#e4e6e2;overflow:hidden}.auto-progress i{display:block;height:100%;border-radius:inherit;background:linear-gradient(90deg,#72c783,#51b769);transition:width .25s ease}.auto-progress b{font-size:9px;color:var(--muted)}
+.progress-preview{display:flex;justify-content:space-between;align-items:center;background:rgba(230,237,231,.62);border-radius:11px;padding:10px 12px;color:var(--muted);font-size:11px}.progress-preview strong{color:var(--green);font-size:16px}

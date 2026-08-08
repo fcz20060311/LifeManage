@@ -1,0 +1,10 @@
+node_modules/
+dist/
+release/
+release-fixed/
+*.log
+*.blockmap
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
