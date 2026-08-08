@@ -9,6 +9,17 @@
 ![Electron](https://img.shields.io/badge/Electron-Desktop-47848f?logo=electron&logoColor=white)
 ![Platform](https://img.shields.io/badge/Platform-Windows-2b7cd3?logo=windows)
 
+## 页面展示
+
+<table>
+  <tr><td align="center"><strong>今日总览</strong></td><td align="center"><strong>专注计时</strong></td></tr>
+  <tr><td><img src="screenshots/home.png" alt="浮光今日总览"></td><td><img src="screenshots/focus.png" alt="浮光专注计时"></td></tr>
+  <tr><td align="center"><strong>记账本</strong></td><td align="center"><strong>任务日历</strong></td></tr>
+  <tr><td><img src="screenshots/ledger.png" alt="浮光记账本"></td><td><img src="screenshots/calendar.png" alt="浮光任务日历"></td></tr>
+  <tr><td align="center"><strong>成长计划</strong></td><td align="center"><strong>生活记录</strong></td></tr>
+  <tr><td><img src="screenshots/roadmap.png" alt="浮光成长计划"></td><td><img src="screenshots/life.png" alt="浮光生活记录"></td></tr>
+</table>
+
 ## 功能
 
 ### 今日总览
@@ -149,4 +160,3 @@ fuguang/
 ## 作者寄语
 
 生活不是一场需要时刻冲刺的比赛。希望浮光能成为一个安静的角落，让计划有迹可循，让时间被温柔看见。
-
