@@ -2,6 +2,7 @@ node_modules/
 dist/
 release/
 release-fixed/
+release-icon/
 *.log
 *.blockmap
 .DS_Store

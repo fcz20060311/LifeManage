@@ -3,10 +3,11 @@ import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 
 const pad = n => String(n).padStart(2, '0')
 const toDateKey = d => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
-const today = toDateKey(new Date())
+const today = ref(toDateKey(new Date()))
 const storage = {
   get(key, fallback) { try { return JSON.parse(localStorage.getItem(`fuguang_${key}`)) ?? fallback } catch { return fallback } },
-  set(key, value) { localStorage.setItem(`fuguang_${key}`, JSON.stringify(value)) }
+  set(key, value) { localStorage.setItem(`fuguang_${key}`, JSON.stringify(value)) },
+  remove(key) { localStorage.removeItem(`fuguang_${key}`) }
 }
 const makeId = () => crypto.randomUUID?.() || `${Date.now()}-${Math.random()}`
 const moneyText = n => `¥${Number(n).toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
@@ -29,15 +30,17 @@ const quotes = [
   ['心若安静，处处都是好风景。', '给自己留一点不被打扰的时间。'], ['今日事，今日慢慢做。', '从容完成，比匆忙完美更重要。'],
   ['不慌不忙，来日方长。', '你不需要和任何人的时钟同步。'], ['微小的日常，构成了具体的幸福。', '记得收藏今天值得喜欢的瞬间。']
 ]
-const dayIndex = Math.floor(new Date(today + 'T00:00:00').getTime() / 86400000)
-const dailyQuote = quotes[((dayIndex % quotes.length) + quotes.length) % quotes.length]
+const dailyQuote = computed(() => {
+  const dayIndex = Math.floor(new Date(today.value + 'T00:00:00').getTime() / 86400000)
+  return quotes[((dayIndex % quotes.length) + quotes.length) % quotes.length]
+})
 
 const tasks = ref(storage.get('tasks', []).map(t => ({ name: t.name ?? t.title, cat: t.cat ?? t.category, ...t })))
 const transactions = ref(storage.get('money', storage.get('transactions', [])).map(t => ({ cat: t.cat ?? t.category, ...t })))
 const logs = ref(storage.get('logs', storage.get('timeLogs', [])).map(t => ({ name: t.name ?? t.title, cat: t.cat ?? t.category, ...t })))
 const plans = ref(storage.get('plans', []).map(p => ({ ...p, progressText: p.progressText || `${Number(p.progress || 0)}/100` })))
-const focusData = ref(storage.get('focus', { date: today, minutes: 0, rounds: 0 }))
-if (focusData.value.date !== today) focusData.value = { date: today, minutes: 0, rounds: 0 }
+const focusData = ref(storage.get('focus', { date: today.value, minutes: 0, rounds: 0 }))
+if (focusData.value.date !== today.value) focusData.value = { date: today.value, minutes: 0, rounds: 0 }
 watch(tasks, v => storage.set('tasks', v), { deep: true })
 watch(transactions, v => storage.set('money', v), { deep: true })
 watch(logs, v => storage.set('logs', v), { deep: true })
@@ -45,46 +48,76 @@ watch(plans, v => storage.set('plans', v), { deep: true })
 watch(focusData, v => storage.set('focus', v), { deep: true })
 
 const notes = ref(storage.get('notes', storage.get('dailyNotes', {})))
-const dailyNote = ref(notes.value[today] || '')
+const dailyNote = ref(notes.value[today.value] || '')
 const noteState = ref('已自动保存')
 let noteTimer
 watch(dailyNote, value => {
   noteState.value = '正在保存…'
   clearTimeout(noteTimer)
-  noteTimer = setTimeout(() => { notes.value[today] = value; storage.set('notes', notes.value); noteState.value = '已自动保存' }, 350)
+  noteTimer = setTimeout(() => { notes.value[today.value] = value; storage.set('notes', notes.value); noteState.value = '已自动保存' }, 350)
 })
 function clearNote() { if (!dailyNote.value || confirm('清空今天的速记内容吗？')) dailyNote.value = '' }
 
 const toast = ref('')
 let toastTimer
-function showToast(text) { toast.value = text; clearTimeout(toastTimer); toastTimer = setTimeout(() => toast.value = '', 1800) }
+function showToast(text, keepUndo = false) {
+  toast.value = text
+  if (!keepUndo) undoVisible.value = false
+  clearTimeout(toastTimer)
+  toastTimer = setTimeout(() => { toast.value = ''; undoVisible.value = false }, keepUndo ? 5000 : 1800)
+}
 
 const taskDialog = ref(null)
 const taskNameInput = ref(null)
-const taskDraft = ref({ name: '', date: today, time: '', cat: '工作' })
-function openTask(date = today) {
-  taskDraft.value = { name: '', date, time: '', cat: '工作' }
+const editingTaskId = ref(null)
+const taskDraft = ref({ name: '', date: today.value, time: '', cat: '工作' })
+function openTask(date = today.value, task = null) {
+  editingTaskId.value = task?.id || null
+  if (task) taskDraft.value = { name: task.name, date: task.date, time: task.time || '', cat: task.cat || '工作' }
+  else taskDraft.value = { name: '', date, time: '', cat: '工作' }
   taskDialog.value.showModal()
   nextTick(() => taskNameInput.value?.focus())
 }
 function saveTask() {
   if (!taskDraft.value.name.trim()) return
-  tasks.value.push({ id: makeId(), ...taskDraft.value, name: taskDraft.value.name.trim(), done: false })
-  taskDialog.value.close(); showToast('任务已放进日历')
+  const data = { ...taskDraft.value, name: taskDraft.value.name.trim() }
+  if (editingTaskId.value) Object.assign(tasks.value.find(t => t.id === editingTaskId.value), data)
+  else tasks.value.push({ id: makeId(), ...data, done: false })
+  taskDialog.value.close(); showToast(editingTaskId.value ? '任务修改已保存' : '任务已放进日历')
+}
+function editTask(id) { const task = tasks.value.find(t => t.id === id); if (task) openTask(task.date, task) }
+function copyEditingTask() {
+  const source = tasks.value.find(t => t.id === editingTaskId.value)
+  if (!source) return
+  tasks.value.push({ ...source, id: makeId(), done: false }); taskDialog.value.close(); showToast('已复制一份任务')
+}
+function postponeEditingTask() {
+  const d = new Date(`${taskDraft.value.date}T00:00:00`); d.setDate(d.getDate() + 1); taskDraft.value.date = toDateKey(d); saveTask()
 }
 function toggleTask(id) { const task = tasks.value.find(t => t.id === id); if (task) { task.done = !task.done; showToast(task.done ? '任务已完成' : '任务已恢复') } }
 function deleteTask(id) { tasks.value = tasks.value.filter(t => t.id !== id) }
+function removeCalendarTask(id) {
+  const task = tasks.value.find(t => t.id === id)
+  if (!task || !confirm(`确定删除“${task.name}”吗？`)) return
+  const index = tasks.value.findIndex(t => t.id === id)
+  lastDeletedTask.value = { task: { ...task }, index }; deleteTask(id); undoVisible.value = true; showToast('任务已从日历删除', true)
+}
+const lastDeletedTask = ref(null), undoVisible = ref(false)
+function undoDeleteTask() {
+  if (!lastDeletedTask.value) return
+  tasks.value.splice(lastDeletedTask.value.index, 0, lastDeletedTask.value.task); lastDeletedTask.value = null; undoVisible.value = false; showToast('已恢复任务')
+}
 
 const planDialog = ref(null)
 const planNameInput = ref(null)
-const planDraft = ref({ phase: '第1阶段', type: '', name: '', status: '待开始', start: today, end: today, progress: 0, progressText: '0/100' })
+const planDraft = ref({ phase: '第1阶段', type: '', name: '', status: '待开始', start: today.value, end: today.value, progress: 0, progressText: '0/100' })
 const planStatuses = ['待开始', '进行中', '已完成', '暂时搁置']
 const sortedPlans = computed(() => plans.value)
 const completedPlans = computed(() => plans.value.filter(x => x.status === '已完成').length)
 const overallPlanProgress = computed(() => plans.value.length ? Math.round(plans.value.reduce((s, x) => s + Number(x.progress || 0), 0) / plans.value.length) : 0)
 function openPlan() {
   const nextPhase = plans.value.length + 1
-  planDraft.value = { phase: `第${nextPhase}阶段`, type: '', name: '', status: '待开始', start: today, end: today, progress: 0, progressText: '0/100' }
+  planDraft.value = { phase: `第${nextPhase}阶段`, type: '', name: '', status: '待开始', start: today.value, end: today.value, progress: 0, progressText: '0/100' }
   planDialog.value.showModal(); nextTick(() => planNameInput.value?.focus())
 }
 function savePlan() {
@@ -110,47 +143,68 @@ function calculatePlanProgress(plan) {
 }
 function deletePlan(id) { if (confirm('删除这个成长阶段吗？')) plans.value = plans.value.filter(x => x.id !== id) }
 
-const todayTasks = computed(() => tasks.value.filter(t => t.date === today).sort((a, b) => (a.time || '').localeCompare(b.time || '')))
-const now = new Date()
-const monthTransactions = computed(() => transactions.value.filter(x => { const d = new Date(`${x.date}T00:00:00`); return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear() }))
+const todayTasks = computed(() => tasks.value.filter(t => t.date === today.value).sort((a, b) => (a.time || '').localeCompare(b.time || '')))
+const ledgerRange = ref('today')
+const todayTransactions = computed(() => transactions.value.filter(x => x.date === today.value))
+const monthTransactions = computed(() => transactions.value.filter(x => x.date?.startsWith(today.value.slice(0, 7))))
 const monthIncome = computed(() => monthTransactions.value.filter(x => x.type === 'income').reduce((s, x) => s + Number(x.amount), 0))
 const monthExpense = computed(() => monthTransactions.value.filter(x => x.type === 'expense').reduce((s, x) => s + Number(x.amount), 0))
 const monthBalance = computed(() => monthIncome.value - monthExpense.value)
+const ledgerTransactions = computed(() => ledgerRange.value === 'today' ? todayTransactions.value : monthTransactions.value)
+const ledgerIncome = computed(() => ledgerTransactions.value.filter(x => x.type === 'income').reduce((s, x) => s + Number(x.amount), 0))
+const ledgerExpense = computed(() => ledgerTransactions.value.filter(x => x.type === 'expense').reduce((s, x) => s + Number(x.amount), 0))
 
 const secondsLeft = ref(0), timerRunning = ref(false), focusName = ref('')
+const timerRecovered = ref(false)
 let interval
 let timerStartedAt = 0
 let elapsedBeforeStart = 0
+const savedTimer = storage.get('activeTimer', null)
+if (savedTimer) {
+  focusName.value = savedTimer.name || ''
+  secondsLeft.value = Math.max(0, Number(savedTimer.elapsed || 0) + (savedTimer.running ? Math.floor((Date.now() - Number(savedTimer.startedAt || Date.now())) / 1000) : 0))
+  elapsedBeforeStart = secondsLeft.value
+  timerRecovered.value = Boolean(savedTimer.running && secondsLeft.value)
+}
 const timerDisplay = computed(() => `${pad(Math.floor(secondsLeft.value / 60))}:${pad(secondsLeft.value % 60)}`)
+function persistTimer() {
+  if (!secondsLeft.value && !timerRunning.value && !focusName.value) return storage.remove('activeTimer')
+  storage.set('activeTimer', { running: timerRunning.value, startedAt: timerStartedAt, elapsed: timerRunning.value ? elapsedBeforeStart : secondsLeft.value, name: focusName.value, savedAt: Date.now() })
+}
 function syncElapsedTime() {
   if (!timerRunning.value) return
   secondsLeft.value = elapsedBeforeStart + Math.floor((Date.now() - timerStartedAt) / 1000)
 }
-function resetTimer() { clearInterval(interval); timerRunning.value = false; secondsLeft.value = 0; elapsedBeforeStart = 0; timerStartedAt = 0 }
+function resetTimer() { clearInterval(interval); timerRunning.value = false; timerRecovered.value = false; secondsLeft.value = 0; elapsedBeforeStart = 0; timerStartedAt = 0; persistTimer() }
 function toggleTimer() {
   if (timerRunning.value) {
-    syncElapsedTime(); timerRunning.value = false; elapsedBeforeStart = secondsLeft.value; clearInterval(interval); return
+    syncElapsedTime(); timerRunning.value = false; elapsedBeforeStart = secondsLeft.value; clearInterval(interval); persistTimer(); return
   }
   timerRunning.value = true
   elapsedBeforeStart = secondsLeft.value
   timerStartedAt = Date.now()
   syncElapsedTime()
   interval = setInterval(syncElapsedTime, 500)
+  persistTimer()
 }
+function resumeRecovered() { timerRecovered.value = false; toggleTimer() }
+function discardRecovered() { if (confirm('放弃上次未结束的计时吗？')) resetTimer() }
 function finishCountup() {
   syncElapsedTime()
   if (secondsLeft.value < 60) return showToast('至少专注一分钟再记录吧')
+  if (!focusName.value.trim()) return showToast('请先填写这段专注的名称')
   const minutes = Math.max(1, Math.round(secondsLeft.value / 60))
   clearInterval(interval); timerRunning.value = false; focusData.value.minutes += minutes
-  logs.value.unshift({ id: makeId(), name: focusName.value.trim() || '自由专注', cat: '工作', date: today, duration: minutes })
-  secondsLeft.value = 0; elapsedBeforeStart = 0; timerStartedAt = 0; showToast(`已记录 ${minutes} 分钟专注`)
+  logs.value.unshift({ id: makeId(), name: focusName.value.trim(), cat: '专注', date: today.value, duration: minutes })
+  secondsLeft.value = 0; elapsedBeforeStart = 0; timerStartedAt = 0; focusName.value = ''; showToast(`已记录 ${minutes} 分钟专注`)
+  timerRecovered.value = false; persistTimer()
 }
-onBeforeUnmount(() => { clearInterval(interval); clearTimeout(noteTimer); clearTimeout(toastTimer) })
+watch(focusName, persistTimer)
 
-const txDraft = ref({ type: 'expense', amount: '', cat: '餐饮', date: today, note: '' })
+const txDraft = ref({ type: 'expense', amount: '', cat: '餐饮', date: today.value, note: '' })
 function addTransaction() {
   transactions.value.unshift({ id: makeId(), ...txDraft.value, amount: Number(txDraft.value.amount) })
-  txDraft.value = { type: 'expense', amount: '', cat: '餐饮', date: today, note: '' }; showToast('账目已保存')
+  txDraft.value = { type: 'expense', amount: '', cat: '餐饮', date: today.value, note: '' }; showToast('账目已保存')
 }
 function deleteTransaction(id) { transactions.value = transactions.value.filter(x => x.id !== id) }
 
@@ -159,7 +213,7 @@ const calendarTitle = computed(() => `${calendarDate.value.getFullYear()} 年 ${
 const calendarDays = computed(() => {
   const y = calendarDate.value.getFullYear(), m = calendarDate.value.getMonth(), first = new Date(y, m, 1), start = new Date(first)
   start.setDate(start.getDate() - ((first.getDay() + 6) % 7))
-  return Array.from({ length: 42 }, (_, i) => { const date = new Date(start); date.setDate(date.getDate() + i); const key = toDateKey(date); return { key, number: date.getDate(), other: date.getMonth() !== m, today: key === today, tasks: tasks.value.filter(t => t.date === key) } })
+  return Array.from({ length: 42 }, (_, i) => { const date = new Date(start); date.setDate(date.getDate() + i); const key = toDateKey(date); return { key, number: date.getDate(), other: date.getMonth() !== m, today: key === today.value, tasks: tasks.value.filter(t => t.date === key) } })
 })
 function moveMonth(step) { calendarDate.value = new Date(calendarDate.value.getFullYear(), calendarDate.value.getMonth() + step, 1) }
 
@@ -171,27 +225,33 @@ const categoryTotals = computed(() => weekLogs.value.reduce((all, x) => ({ ...al
 const topCategory = computed(() => Object.entries(categoryTotals.value).sort((a, b) => b[1] - a[1])[0]?.[0] || '暂无')
 const weekBars = computed(() => { const start = startOfWeek(); return Array.from({ length: 7 }, (_, i) => { const d = new Date(start); d.setDate(d.getDate() + i); return weekLogs.value.filter(x => x.date === toDateKey(d)).reduce((s, x) => s + Number(x.duration), 0) }) })
 const maxBar = computed(() => Math.max(...weekBars.value, 1))
-const logDraft = ref({ name: '', cat: '工作', date: today, duration: 60 })
-function addLog() { logs.value.unshift({ id: makeId(), ...logDraft.value, name: logDraft.value.name.trim(), duration: Number(logDraft.value.duration) }); logDraft.value = { name: '', cat: '工作', date: today, duration: 60 }; showToast('时间已记录') }
+const logDraft = ref({ name: '', cat: '工作', date: today.value, duration: 60 })
+function addLog() { logs.value.unshift({ id: makeId(), ...logDraft.value, name: logDraft.value.name.trim(), duration: Number(logDraft.value.duration) }); logDraft.value = { name: '', cat: '工作', date: today.value, duration: 60 }; showToast('时间已记录') }
 function deleteLog(id) { logs.value = logs.value.filter(x => x.id !== id) }
 const recentLogs = computed(() => logs.value.slice(0, 4))
 const lifeRange = ref('week')
-const archiveMonth = ref(today.slice(0, 7))
-const monthLogs = computed(() => logs.value.filter(x => { const d = new Date(`${x.date}T00:00:00`); return d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear() }))
+const moneyRange = ref('today')
+const archiveMonth = ref(today.value.slice(0, 7))
+const monthLogs = computed(() => logs.value.filter(x => x.date?.startsWith(today.value.slice(0, 7))))
+const todayLogs = computed(() => logs.value.filter(x => x.date === today.value))
 const archiveLogs = computed(() => logs.value.filter(x => x.date?.startsWith(archiveMonth.value)))
 const archiveTransactions = computed(() => transactions.value.filter(x => x.date?.startsWith(archiveMonth.value)))
 const archiveIncome = computed(() => archiveTransactions.value.filter(x => x.type === 'income').reduce((s, x) => s + Number(x.amount), 0))
 const archiveExpense = computed(() => archiveTransactions.value.filter(x => x.type === 'expense').reduce((s, x) => s + Number(x.amount), 0))
-const activeLifeLogs = computed(() => lifeRange.value === 'week' ? weekLogs.value : archiveLogs.value)
-const lifeCategoryTotals = computed(() => activeLifeLogs.value.reduce((all, x) => ({ ...all, [x.cat]: (all[x.cat] || 0) + Number(x.duration) }), {}))
+const activeLifeLogs = computed(() => lifeRange.value === 'today' ? todayLogs.value : lifeRange.value === 'week' ? weekLogs.value : archiveLogs.value)
+const lifeCategoryTotals = computed(() => activeLifeLogs.value.reduce((all, x) => { const label = String(x.name || '未命名记录').trim(); return { ...all, [label]: (all[label] || 0) + Number(x.duration) } }, {}))
 const palette = { 工作: '#557b6d', 学习: '#7f9cad', 生活: '#d6ad67', 运动: '#d98068', 娱乐: '#9c8bac' }
+const timePalette = ['#557b6d','#7f9cad','#d6ad67','#d98068','#9c8bac','#7fa88e','#c38d78','#6f96a3','#b6a269','#8f7da1']
+function timeColor(label) { let hash = 0; for (const char of String(label)) hash = (hash * 31 + char.charCodeAt(0)) >>> 0; return timePalette[hash % timePalette.length] }
 const donutStyle = computed(() => {
   const entries = Object.entries(lifeCategoryTotals.value), total = entries.reduce((s, [, v]) => s + v, 0)
   if (!total) return { background: '#e7e5de' }
-  let current = 0; const parts = entries.map(([key, value]) => { const start = current; current += value / total * 100; return `${palette[key] || '#aaa'} ${start}% ${current}%` })
+  let current = 0; const parts = entries.map(([key, value]) => { const start = current; current += value / total * 100; return `${timeColor(key)} ${start}% ${current}%` })
   return { background: `conic-gradient(${parts.join(',')})` }
 })
-const expenseTotals = computed(() => archiveTransactions.value.filter(x => x.type === 'expense').reduce((all, x) => ({ ...all, [x.cat]: (all[x.cat] || 0) + Number(x.amount) }), {}))
+const activeMoneyTransactions = computed(() => moneyRange.value === 'today' ? todayTransactions.value : archiveTransactions.value)
+const activeExpense = computed(() => activeMoneyTransactions.value.filter(x => x.type === 'expense').reduce((s, x) => s + Number(x.amount), 0))
+const expenseTotals = computed(() => activeMoneyTransactions.value.filter(x => x.type === 'expense').reduce((all, x) => ({ ...all, [x.cat]: (all[x.cat] || 0) + Number(x.amount) }), {}))
 const expensePalette = ['#557b6d','#7f9cad','#d6ad67','#d98068','#9c8bac','#91a985','#c79678']
 const expenseDonutStyle = computed(() => {
   const entries = Object.entries(expenseTotals.value), total = entries.reduce((s, [, v]) => s + v, 0)
@@ -205,9 +265,57 @@ function exportMemories() {
   link.href = url; link.download = `浮光生活纪念册-${archiveMonth.value}.json`; link.click(); URL.revokeObjectURL(url)
   showToast('这个月的记忆已导出')
 }
+const backupInput = ref(null)
+function exportAllData() {
+  const payload = { app: '浮光', version: 1, exportedAt: new Date().toISOString(), tasks: tasks.value, transactions: transactions.value, lifeRecords: logs.value, growthPlans: plans.value, dailyNotes: notes.value, focus: focusData.value }
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json;charset=utf-8' })
+  const url = URL.createObjectURL(blob), link = document.createElement('a')
+  link.href = url; link.download = `浮光完整备份-${today.value}.json`; link.click(); URL.revokeObjectURL(url); showToast('完整备份已导出')
+}
+async function importAllData(event) {
+  const file = event.target.files?.[0]
+  if (!file) return
+  try {
+    const data = JSON.parse(await file.text())
+    if (!data || !Array.isArray(data.tasks) || !Array.isArray(data.transactions) || !Array.isArray(data.lifeRecords)) throw new Error('invalid')
+    if (!confirm('导入会替换浮光当前的数据，确定继续吗？建议先导出一次完整备份。')) return
+    tasks.value = data.tasks; transactions.value = data.transactions; logs.value = data.lifeRecords; plans.value = Array.isArray(data.growthPlans) ? data.growthPlans : []
+    notes.value = data.dailyNotes && typeof data.dailyNotes === 'object' ? data.dailyNotes : {}; dailyNote.value = notes.value[today.value] || ''
+    if (data.focus && typeof data.focus === 'object') focusData.value = data.focus
+    storage.set('notes', notes.value); showToast('备份已恢复')
+  } catch { alert('无法导入：这不是有效的浮光完整备份文件。') }
+  finally { event.target.value = '' }
+}
+
+let dateCheckTimer
+function checkDateRollover() {
+  const nextDay = toDateKey(new Date())
+  if (nextDay === today.value) return
+  const previousDay = today.value
+  notes.value[previousDay] = dailyNote.value; storage.set('notes', notes.value)
+  today.value = nextDay; dailyNote.value = notes.value[nextDay] || ''
+  if (focusData.value.date !== nextDay) focusData.value = { date: nextDay, minutes: 0, rounds: 0 }
+  if (taskDraft.value.date === previousDay) taskDraft.value.date = nextDay
+  if (txDraft.value.date === previousDay) txDraft.value.date = nextDay
+  if (logDraft.value.date === previousDay) logDraft.value.date = nextDay
+  if (archiveMonth.value === previousDay.slice(0, 7)) archiveMonth.value = nextDay.slice(0, 7)
+  showToast('新的一天，浮光已为你翻页')
+}
+dateCheckTimer = setInterval(checkDateRollover, 30000)
+window.addEventListener('focus', checkDateRollover)
+document.addEventListener('visibilitychange', checkDateRollover)
+onBeforeUnmount(() => {
+  syncElapsedTime(); persistTimer(); notes.value[today.value] = dailyNote.value; storage.set('notes', notes.value)
+  clearInterval(interval); clearInterval(dateCheckTimer); clearTimeout(noteTimer); clearTimeout(toastTimer)
+  window.removeEventListener('focus', checkDateRollover); document.removeEventListener('visibilitychange', checkDateRollover)
+})
 </script>
 
 <template>
+  <div class="anime-scene" aria-hidden="true">
+    <div class="scene-painting"></div><div class="scene-clouds"></div><div class="scene-sunlight"></div><div class="scene-water"></div>
+    <div class="petal-field"><i v-for="n in 16" :key="n" :style="{ '--n': n }"></i></div>
+  </div>
   <div class="shell">
     <aside>
       <div class="brand"><span>光</span><div><strong>浮光</strong><small>个人管理台</small></div></div>
@@ -227,15 +335,16 @@ function exportMemories() {
       <section v-else-if="page === 'focus'" class="grid focus-layout">
         <article class="card timer-card">
           <p class="eyebrow">FLOW TIMER</p><h2 class="focus-heading">正向专注</h2><p class="countup-hint">从零开始，不设终点。结束后，这段光阴会被收进生活记录。</p>
+          <div v-if="timerRecovered" class="timer-recovery"><div><strong>发现一段未结束的专注</strong><span>离开期间的时间已按真实时钟补齐，你可以继续、记录或放弃。</span></div><div><button class="text-btn" @click="discardRecovered">放弃</button><button class="secondary" @click="finishCountup">结束并记录</button><button class="primary" @click="resumeRecovered">继续计时</button></div></div>
           <div class="timer-ring countup"><div><small>此刻专注</small><strong>{{ timerDisplay }}</strong><span>今日已专注 {{ focusData.minutes }} 分钟</span></div></div>
           <input v-model="focusName" class="focus-input" placeholder="这次想专注做什么？"><div class="timer-actions"><button class="secondary" @click="resetTimer">↺ 重新开始</button><button class="primary" @click="toggleTimer">{{ timerRunning ? 'Ⅱ 暂停一下' : secondsLeft ? '▶ 继续计时' : '▶ 开始计时' }}</button><button v-if="secondsLeft" class="secondary finish-btn" @click="finishCountup">✓ 结束并记录</button></div>
         </article>
         <article class="card today-panel"><div class="card-head"><div><p class="eyebrow">TODAY'S TASKS</p><h2>今日应做</h2></div><span class="task-count">{{ todayTasks.filter(t => !t.done).length }} 项待办</span></div><div v-if="todayTasks.length" class="item-list"><div v-for="task in todayTasks" :key="task.id" class="item"><button class="check" :class="{ checked: task.done }" @click="toggleTask(task.id)">✓</button><div :class="['item-main', { done: task.done }]"><strong>{{ task.name }}</strong><small>{{ task.time || '全天' }} · {{ task.cat }}</small></div></div></div><div v-else class="empty">今天还没有任务<br><button class="text-btn" @click="openTask()">添加第一项安排 →</button></div><button v-if="todayTasks.length" class="add-task-inline" @click="openTask()">＋ 添加今日任务</button></article>
       </section>
 
-      <section v-else-if="page === 'ledger'"><div class="grid stats"><article class="balance-card"><span>本月结余</span><strong>{{ moneyText(monthBalance) }}</strong></article><article class="card stat"><span>本月收入</span><strong class="green">{{ moneyText(monthIncome) }}</strong></article><article class="card stat"><span>本月支出</span><strong class="coral">{{ moneyText(monthExpense) }}</strong></article></div><div class="grid form-layout"><article class="card"><h2>记一笔</h2><form @submit.prevent="addTransaction"><div class="type-switch"><button type="button" :class="{ active: txDraft.type === 'expense' }" @click="txDraft.type = 'expense'">支出</button><button type="button" :class="{ active: txDraft.type === 'income' }" @click="txDraft.type = 'income'">收入</button></div><label>金额<input v-model="txDraft.amount" type="number" min="0.01" step="0.01" required placeholder="0.00"></label><div class="form-row"><label>分类<select v-model="txDraft.cat"><option v-for="x in ['餐饮','交通','购物','居住','学习','工资','其他']">{{ x }}</option></select></label><label>日期<input v-model="txDraft.date" type="date" required></label></div><label>备注<input v-model="txDraft.note" placeholder="可选"></label><button class="primary full">保存记录</button></form></article><article class="card"><h2>最近明细</h2><div v-if="transactions.length" class="item-list"><div v-for="tx in transactions.slice(0,20)" :key="tx.id" class="item"><span class="money-icon">{{ tx.cat[0] }}</span><div class="item-main"><strong>{{ tx.note || tx.cat }}</strong><small>{{ tx.date }} · {{ tx.cat }}</small></div><b :class="tx.type === 'income' ? 'green' : 'coral'">{{ tx.type === 'income' ? '+' : '−' }}{{ moneyText(tx.amount) }}</b><button class="delete" @click="deleteTransaction(tx.id)">×</button></div></div><div v-else class="empty">还没有账目记录</div></article></div></section>
+      <section v-else-if="page === 'ledger'"><div class="view-toolbar"><div><p class="eyebrow">MONEY VIEW</p><h2>{{ ledgerRange === 'today' ? '今日收支' : '本月收支' }}</h2></div><div class="range-switch"><button :class="{ active: ledgerRange === 'today' }" @click="ledgerRange = 'today'">今日</button><button :class="{ active: ledgerRange === 'month' }" @click="ledgerRange = 'month'">本月</button></div></div><div class="grid stats"><article class="balance-card"><span>{{ ledgerRange === 'today' ? '今日' : '本月' }}结余</span><strong>{{ moneyText(ledgerIncome - ledgerExpense) }}</strong></article><article class="card stat"><span>{{ ledgerRange === 'today' ? '今日' : '本月' }}收入</span><strong class="green">{{ moneyText(ledgerIncome) }}</strong></article><article class="card stat"><span>{{ ledgerRange === 'today' ? '今日' : '本月' }}支出</span><strong class="coral">{{ moneyText(ledgerExpense) }}</strong></article></div><div class="grid form-layout"><article class="card"><h2>记一笔</h2><form @submit.prevent="addTransaction"><div class="type-switch"><button type="button" :class="{ active: txDraft.type === 'expense' }" @click="txDraft.type = 'expense'">支出</button><button type="button" :class="{ active: txDraft.type === 'income' }" @click="txDraft.type = 'income'">收入</button></div><label>金额<input v-model="txDraft.amount" type="number" min="0.01" step="0.01" required placeholder="0.00"></label><div class="form-row"><label>分类<select v-model="txDraft.cat"><option v-for="x in ['餐饮','交通','购物','居住','学习','工资','其他']">{{ x }}</option></select></label><label>日期<input v-model="txDraft.date" type="date" required></label></div><label>备注<input v-model="txDraft.note" placeholder="可选"></label><button class="primary full">保存记录</button></form></article><article class="card"><h2>{{ ledgerRange === 'today' ? '今日明细' : '本月明细' }}</h2><div v-if="ledgerTransactions.length" class="item-list"><div v-for="tx in ledgerTransactions.slice(0,30)" :key="tx.id" class="item"><span class="money-icon">{{ tx.cat[0] }}</span><div class="item-main"><strong>{{ tx.note || tx.cat }}</strong><small>{{ tx.date }} · {{ tx.cat }}</small></div><b :class="tx.type === 'income' ? 'green' : 'coral'">{{ tx.type === 'income' ? '+' : '−' }}{{ moneyText(tx.amount) }}</b><button class="delete" @click="deleteTransaction(tx.id)">×</button></div></div><div v-else class="empty">这个范围内还没有账目记录</div></article></div></section>
 
-      <section v-else-if="page === 'calendar'"><div class="calendar-toolbar"><button class="secondary" @click="moveMonth(-1)">←</button><h2>{{ calendarTitle }}</h2><button class="secondary" @click="moveMonth(1)">→</button></div><article class="card calendar-card"><div class="week-head"><span v-for="d in ['周一','周二','周三','周四','周五','周六','周日']">{{ d }}</span></div><div class="calendar-grid"><div v-for="day in calendarDays" :key="day.key" :class="['day', { other: day.other, today: day.today }]" @click="openTask(day.key)"><b>{{ day.number }}</b><button v-for="task in day.tasks.slice(0,3)" :key="task.id" :class="['event', { done: task.done }]" :title="task.done ? '点击恢复任务' : '点击完成任务'" @click.stop="toggleTask(task.id)">{{ task.name }}</button></div></div></article><p class="calendar-tip">提示：点击任务可完成或恢复；点击日期空白处可添加任务。</p></section>
+      <section v-else-if="page === 'calendar'"><div class="calendar-toolbar"><button class="secondary" @click="moveMonth(-1)">←</button><h2>{{ calendarTitle }}</h2><button class="secondary" @click="moveMonth(1)">→</button></div><article class="card calendar-card"><div class="week-head"><span v-for="d in ['周一','周二','周三','周四','周五','周六','周日']">{{ d }}</span></div><div class="calendar-grid"><div v-for="day in calendarDays" :key="day.key" :class="['day', { other: day.other, today: day.today }]" @click="openTask(day.key)"><b>{{ day.number }}</b><div v-for="task in day.tasks.slice(0,3)" :key="task.id" :class="['calendar-event', { done: task.done }]" @click.stop><button class="event-main" :title="task.done ? '点击恢复任务' : '点击完成任务'" @click="toggleTask(task.id)">{{ task.name }}</button><button class="event-edit" title="编辑任务" aria-label="编辑任务" @click="editTask(task.id)">✎</button><button class="event-remove" title="删除任务" aria-label="删除任务" @click="removeCalendarTask(task.id)">×</button></div></div></div></article><p class="calendar-tip">提示：点击任务正文可完成或恢复；点击 ✎ 可编辑、复制或顺延；点击 × 可删除；点击日期空白处可添加。</p></section>
 
       <section v-else-if="page === 'roadmap'">
         <div class="grid plan-stats"><article class="plan-overview"><div><p class="eyebrow">YOUR JOURNEY</p><h2>成长不是赶路，是沿途留下坐标。</h2><span>把想抵达的地方，拆成今天可以开始的一小步。</span></div><div class="overall-ring" :style="{ '--value': `${overallPlanProgress * 3.6}deg` }"><strong>{{ overallPlanProgress }}%</strong></div></article><article class="card stat"><span>全部阶段</span><strong>{{ plans.length }}<small> 个</small></strong></article><article class="card stat"><span>已经走过</span><strong>{{ completedPlans }}<small> 个</small></strong></article></div>
@@ -252,18 +361,18 @@ function exportMemories() {
       </section>
 
       <section v-else>
-        <div class="archive-toolbar"><div><p class="eyebrow">MONTHLY MEMORY</p><h2>月度留存</h2><span>每个月的收支、时间与速记都会留在这里。</span></div><div class="archive-actions"><label>回看月份<input v-model="archiveMonth" type="month"></label><button class="primary" @click="exportMemories">⇩ 导出这个月</button></div></div>
-        <div class="grid stats life-stats"><article class="balance-card"><span>{{ archiveMonth }} 月度结余</span><strong>{{ moneyText(archiveIncome - archiveExpense) }}</strong><small>收入 {{ moneyText(archiveIncome) }} · 支出 {{ moneyText(archiveExpense) }}</small></article><article class="card stat"><span>留下的生活片段</span><strong>{{ archiveLogs.length + archiveTransactions.length }}<small> 条</small></strong></article><article class="card stat"><span>本周拾取的光阴</span><strong>{{ (trackedMinutes / 60).toFixed(1) }}<small> 小时</small></strong></article></div>
+        <div class="archive-toolbar"><div><p class="eyebrow">MONTHLY MEMORY</p><h2>月度留存</h2><span>每个月的收支、时间与速记都会留在这里。</span></div><div class="archive-actions"><label>回看月份<input v-model="archiveMonth" type="month"></label><button class="secondary" @click="exportAllData">备份全部</button><button class="secondary" @click="backupInput.click()">恢复备份</button><input ref="backupInput" class="hidden-file" type="file" accept="application/json,.json" @change="importAllData"><button class="primary" @click="exportMemories">⇩ 导出这个月</button></div></div>
+        <div class="grid stats life-stats"><article class="balance-card"><span>{{ archiveMonth }} 月度结余</span><strong>{{ moneyText(archiveIncome - archiveExpense) }}</strong><small>收入 {{ moneyText(archiveIncome) }} · 支出 {{ moneyText(archiveExpense) }}</small></article><article class="card stat"><span>今日留下的片段</span><strong>{{ todayLogs.length + todayTransactions.length }}<small> 条</small></strong></article><article class="card stat"><span>今日拾取的光阴</span><strong>{{ (todayLogs.reduce((s,x)=>s + Number(x.duration),0) / 60).toFixed(1) }}<small> 小时</small></strong></article></div>
         <div class="grid life-grid">
-          <article class="card chart-card"><div class="card-head"><div><p class="eyebrow">MONEY FLOW</p><h2>人间烟火账</h2><span class="chart-subtitle">一蔬一饭，也是一月生活的注脚。</span></div><span class="soft-pill">{{ moneyText(archiveExpense) }}</span></div><div class="donut-layout"><div class="donut" :style="expenseDonutStyle"><div><strong>{{ archiveTransactions.filter(x => x.type === 'expense').length }}</strong><span>笔支出</span></div></div><div class="chart-legend"><div v-for="([cat,value],i) in Object.entries(expenseTotals).sort((a,b)=>b[1]-a[1])" :key="cat"><i :style="{ background: expensePalette[i % expensePalette.length] }"></i><span>{{ cat }}</span><b>{{ moneyText(value) }}</b></div><p v-if="!archiveExpense">这个月还没有支出记录</p></div></div></article>
-          <article class="card chart-card"><div class="card-head"><div><p class="eyebrow">TIME FLOW</p><h2>光阴落处</h2><span class="chart-subtitle">看见时间停驻过的地方。</span></div><div class="range-switch"><button :class="{ active: lifeRange === 'week' }" @click="lifeRange = 'week'">本周</button><button :class="{ active: lifeRange === 'month' }" @click="lifeRange = 'month'">所选月</button></div></div><div class="donut-layout"><div class="donut" :style="donutStyle"><div><strong>{{ (activeLifeLogs.reduce((s,x)=>s + Number(x.duration),0) / 60).toFixed(1) }}</strong><span>小时</span></div></div><div class="chart-legend"><div v-for="([cat,value]) in Object.entries(lifeCategoryTotals).sort((a,b)=>b[1]-a[1])" :key="cat"><i :style="{ background: palette[cat] }"></i><span>{{ cat }}</span><b>{{ (value / 60).toFixed(1) }}h</b></div><p v-if="!activeLifeLogs.length">还没有时间记录</p></div></div></article>
+          <article class="card chart-card"><div class="card-head"><div><p class="eyebrow">MONEY FLOW</p><h2>人间烟火账</h2><span class="chart-subtitle">一蔬一饭，也是生活的注脚。</span></div><div class="range-switch"><button :class="{ active: moneyRange === 'today' }" @click="moneyRange = 'today'">今日</button><button :class="{ active: moneyRange === 'month' }" @click="moneyRange = 'month'">所选月</button></div></div><div class="donut-layout"><div class="donut" :style="expenseDonutStyle"><div><strong>{{ activeMoneyTransactions.filter(x => x.type === 'expense').length }}</strong><span>笔支出</span></div></div><div class="chart-legend"><div v-for="([cat,value],i) in Object.entries(expenseTotals).sort((a,b)=>b[1]-a[1])" :key="cat"><i :style="{ background: expensePalette[i % expensePalette.length] }"></i><span>{{ cat }}</span><b>{{ moneyText(value) }}</b></div><p v-if="!activeExpense">{{ moneyRange === 'today' ? '今天' : '这个月' }}还没有支出记录</p></div></div></article>
+          <article class="card chart-card"><div class="card-head"><div><p class="eyebrow">TIME FLOW</p><h2>光阴落处</h2><span class="chart-subtitle">按每项事务的具体名称，看见时间停驻的地方。</span></div><div class="range-switch"><button :class="{ active: lifeRange === 'today' }" @click="lifeRange = 'today'">今日</button><button :class="{ active: lifeRange === 'week' }" @click="lifeRange = 'week'">本周</button><button :class="{ active: lifeRange === 'month' }" @click="lifeRange = 'month'">所选月</button></div></div><div class="donut-layout"><div class="donut" :style="donutStyle"><div><strong>{{ (activeLifeLogs.reduce((s,x)=>s + Number(x.duration),0) / 60).toFixed(1) }}</strong><span>小时</span></div></div><div class="chart-legend"><div v-for="([name,value]) in Object.entries(lifeCategoryTotals).sort((a,b)=>b[1]-a[1])" :key="name"><i :style="{ background: timeColor(name) }"></i><span :title="name">{{ name }}</span><b>{{ (value / 60).toFixed(1) }}h</b></div><p v-if="!activeLifeLogs.length">还没有时间记录</p></div></div></article>
         </div>
         <div class="grid form-layout section-gap"><article class="card"><div class="card-head"><div><p class="eyebrow">ADD A MOMENT</p><h2>拾取一段生活</h2></div></div><form @submit.prevent="addLog"><label>这段时间做了什么<input v-model="logDraft.name" required placeholder="例如：画稿、阅读、散步"></label><div class="form-row"><label>分类<select v-model="logDraft.cat"><option v-for="x in ['工作','学习','生活','运动','娱乐']">{{ x }}</option></select></label><label>日期<input v-model="logDraft.date" type="date" required></label></div><label>用时（分钟）<input v-model="logDraft.duration" type="number" min="5" step="5" required></label><button class="primary full">收入生活册</button></form></article><article class="card"><div class="card-head"><div><p class="eyebrow">RECENT MOMENTS</p><h2>近日拾光</h2></div></div><div v-if="logs.length" class="item-list"><div v-for="log in logs.slice(0,8)" :key="log.id" class="item"><span class="dot" :style="{ background: palette[log.cat] }"></span><div class="item-main"><strong>{{ log.name }}</strong><small>{{ log.date }} · {{ log.cat }}</small></div><b>{{ log.duration }} 分钟</b><button class="delete" @click="deleteLog(log.id)">×</button></div></div><div v-else class="empty">从记录今天的一小段生活开始吧。</div></article></div>
       </section>
     </main>
   </div>
 
-  <dialog ref="taskDialog"><form class="dialog-form" @submit.prevent="saveTask"><div class="dialog-head"><div><p class="eyebrow">NEW TASK</p><h2>添加正式任务</h2></div><button type="button" class="close" @click="taskDialog.close()">×</button></div><label>任务名称<input ref="taskNameInput" v-model="taskDraft.name" required placeholder="想做什么？"></label><div class="form-row"><label>日期<input v-model="taskDraft.date" type="date" required></label><label>时间（可不填）<input v-model="taskDraft.time" type="time"></label></div><label>分类<select v-model="taskDraft.cat"><option v-for="x in ['工作','学习','生活','运动']">{{ x }}</option></select></label><div class="dialog-actions"><button type="button" class="secondary" @click="taskDialog.close()">取消</button><button class="primary">保存任务</button></div></form></dialog>
+  <dialog ref="taskDialog"><form class="dialog-form" @submit.prevent="saveTask"><div class="dialog-head"><div><p class="eyebrow">{{ editingTaskId ? 'EDIT TASK' : 'NEW TASK' }}</p><h2>{{ editingTaskId ? '编辑正式任务' : '添加正式任务' }}</h2></div><button type="button" class="close" @click="taskDialog.close()">×</button></div><label>任务名称<input ref="taskNameInput" v-model="taskDraft.name" required placeholder="想做什么？"></label><div class="form-row"><label>日期<input v-model="taskDraft.date" type="date" required></label><label>时间（可不填）<input v-model="taskDraft.time" type="time"></label></div><label>分类<select v-model="taskDraft.cat"><option v-for="x in ['工作','学习','生活','运动']">{{ x }}</option></select></label><div v-if="editingTaskId" class="task-quick-actions"><button type="button" class="secondary" @click="copyEditingTask">复制一份</button><button type="button" class="secondary" @click="postponeEditingTask">顺延一天</button></div><div class="dialog-actions"><button type="button" class="secondary" @click="taskDialog.close()">取消</button><button class="primary">{{ editingTaskId ? '保存修改' : '保存任务' }}</button></div></form></dialog>
   <dialog ref="planDialog"><form class="dialog-form" @submit.prevent="savePlan"><div class="dialog-head"><div><p class="eyebrow">NEW MILESTONE</p><h2>添加成长阶段</h2></div><button type="button" class="close" @click="planDialog.close()">×</button></div><div class="form-row"><label>阶段名称 / 序号<input v-model="planDraft.phase" type="text" required placeholder="例如：第一阶段、基础入门"></label><label>自定义类型<input v-model="planDraft.type" type="text" required placeholder="例如：技术线、作品集、长期习惯"></label></div><label>学习 / 成长内容<input ref="planNameInput" v-model="planDraft.name" type="text" required placeholder="例如：完成 Vue 3 系统学习"></label><div class="form-row"><label>开始日期<input v-model="planDraft.start" type="date" required></label><label>结束日期<input v-model="planDraft.end" type="date" :min="planDraft.start" required></label></div><div class="form-row"><label>初始状态<select v-model="planDraft.status"><option v-for="status in planStatuses">{{ status }}</option></select></label><label>完成量 / 总量<input v-model="planDraft.progressText" type="text" inputmode="decimal" required placeholder="例如：173/200" @input="calculatePlanProgress(planDraft)"></label></div><div class="progress-preview"><span>自动计算进度</span><strong>{{ planDraft.progress }}%</strong></div><div class="dialog-actions"><button type="button" class="secondary" @click="planDialog.close()">取消</button><button class="primary">加入成长路线</button></div></form></dialog>
-  <Transition name="toast"><div v-if="toast" class="toast">{{ toast }}</div></Transition>
+  <Transition name="toast"><div v-if="toast" class="toast"><span>{{ toast }}</span><button v-if="undoVisible" @click="undoDeleteTask">撤销</button></div></Transition>
 </template>

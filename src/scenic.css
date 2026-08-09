@@ -1,8 +1,6 @@
 /* 清淡自然系视觉层 */
-body{background:#edf2ed url('/assets/misty-lake-bg.png') center/cover fixed no-repeat;position:relative}
-body:before{content:"";position:fixed;inset:-4%;z-index:-1;background:url('/assets/misty-lake-bg.png') center/cover no-repeat;animation:landscapeBreath 22s ease-in-out infinite alternate;filter:saturate(.82)}
-body:after{content:"";position:fixed;inset:0;z-index:-1;background:linear-gradient(115deg,rgba(247,248,242,.82),rgba(244,247,242,.49) 55%,rgba(235,242,237,.68));backdrop-filter:blur(1px)}
-@keyframes landscapeBreath{from{transform:scale(1.02) translate3d(-.4%,0,0)}to{transform:scale(1.07) translate3d(.7%,-.5%,0)}}
+body{background:#dce9e5;position:relative}#app{position:relative;isolation:isolate}.anime-scene{position:fixed;inset:0;z-index:0;overflow:hidden;background:#dce9e5;pointer-events:none}.shell{position:relative;z-index:1}.scene-painting{position:absolute;inset:0;background:url('/assets/anime-lakeside-scene.png') center/cover no-repeat;filter:saturate(.86) contrast(.94)}.anime-scene:after{content:"";position:absolute;inset:0;background:linear-gradient(105deg,rgba(248,249,243,.84),rgba(246,249,244,.54) 48%,rgba(237,246,241,.25));backdrop-filter:blur(.6px)}
+.scene-clouds,.scene-sunlight,.scene-water,.petal-field{display:none}
 aside{background:rgba(247,249,244,.72);backdrop-filter:blur(24px) saturate(1.15);border-color:rgba(255,255,255,.62);box-shadow:12px 0 40px rgba(58,76,65,.05)}
 .card,.quick-note{background:rgba(255,255,252,.76);border-color:rgba(255,255,255,.76);backdrop-filter:blur(22px) saturate(1.12);box-shadow:0 16px 50px rgba(52,75,61,.09),inset 0 1px 0 rgba(255,255,255,.8)}
 .topbar{position:relative}.topbar:after{content:"";position:absolute;right:25%;top:31%;width:6px;height:6px;border-radius:50%;background:#fff9;box-shadow:45px 23px 0 1px #fff7,90px -8px 0 #fff8;animation:floatLights 6s ease-in-out infinite alternate}
@@ -18,4 +16,4 @@ aside{background:rgba(247,249,244,.72);backdrop-filter:blur(24px) saturate(1.15)
 @media(max-width:1000px){.life-grid{grid-template-columns:1fr}.donut-layout{min-height:220px}}
 @media(max-width:900px){.plan-stats{grid-template-columns:1fr 1fr}.plan-overview{grid-column:1/-1}}
 @media(max-width:620px){body:after{background:rgba(245,248,243,.72)}nav{grid-template-columns:repeat(6,1fr)}.donut-layout{flex-direction:column;gap:18px}.chart-legend{width:80%}.today-panel{min-height:0}.clock-types{width:100%}.life-stats{grid-template-columns:1fr}.side-quote{display:none}.archive-toolbar{align-items:stretch;gap:16px;flex-direction:column}.archive-actions{display:grid;grid-template-columns:1fr}.archive-actions label{min-width:0}.roadmap-head{padding:20px 17px}.plan-overview{padding:21px}.plan-overview h2{font-size:17px}}
-@media(prefers-reduced-motion:reduce){body:before,.topbar:after,.timer-ring.countup,.timer-ring.countup:before{animation:none}}
+@media(prefers-reduced-motion:reduce){.anime-scene *,.topbar:after,.timer-ring.countup,.timer-ring.countup:before{animation:none!important}}
