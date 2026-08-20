@@ -1,7 +1,7 @@
 {
   "name": "fuguang-personal-dashboard",
   "private": true,
-  "version": "1.0.0",
+  "version": "1.0.1",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -35,7 +35,12 @@
     "win": {
       "icon": "build/fuguang-icon.ico",
       "target": [
-        { "target": "nsis", "arch": ["x64"] }
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
       ],
       "artifactName": "Fuguang-Setup-${version}-${arch}.${ext}"
     },
