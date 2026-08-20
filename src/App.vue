@@ -16,11 +16,11 @@ const page = ref('home')
 const pageMeta = {
   home: ['TODAY', '你好，今天想做些什么？'], focus: ['FOCUS', '留一段完整时间给自己'],
   ledger: ['LEDGER', '每一笔，都心中有数'], calendar: ['CALENDAR', '把事情安放在时间里'],
-  roadmap: ['GROWTH MAP', '把远方拆成一步一步'], insights: ['LIFE ARCHIVE', '生活留下痕迹，也长出方向']
+  roadmap: ['GROWTH MAP', '把远方拆成一步一步'], countdown: ['COUNTDOWN', '把期待放进日历里'], insights: ['LIFE ARCHIVE', '生活留下痕迹，也长出方向']
 }
 const nav = [
   ['home', '⌂', '今日总览'], ['focus', '◷', '专注计时'], ['ledger', '¥', '记账本'],
-  ['calendar', '□', '日历'], ['roadmap', '≡', '成长计划'], ['insights', '⌁', '生活记录']
+  ['calendar', '□', '日历'], ['roadmap', '≡', '成长计划'], ['countdown', '⌛', '目标倒计时'], ['insights', '⌁', '生活记录']
 ]
 const quotes = [
   ['生活不是赶路，而是感受路。', '愿你在寻常里，看见细小的光。'], ['去做具体的事，去爱具体的人。', '把注意力交还给真实的生活。'],
@@ -57,6 +57,37 @@ watch(dailyNote, value => {
   noteTimer = setTimeout(() => { notes.value[today.value] = value; storage.set('notes', notes.value); noteState.value = '已自动保存' }, 350)
 })
 function clearNote() { if (!dailyNote.value || confirm('清空今天的速记内容吗？')) dailyNote.value = '' }
+
+const countdowns = ref(storage.get('countdowns', []).map(item => ({ color: '#6f9f91', ...item })))
+watch(countdowns, value => storage.set('countdowns', value), { deep: true })
+const countdownDialog = ref(null)
+const countdownNameInput = ref(null)
+const editingCountdownId = ref(null)
+const countdownDraft = ref({ name: '', date: '', note: '', color: '#6f9f91' })
+function openCountdown(item = null) {
+  editingCountdownId.value = item?.id || null
+  countdownDraft.value = item ? { name: item.name, date: item.date, note: item.note || '', color: item.color || '#6f9f91' } : { name: '', date: '', note: '', color: '#6f9f91' }
+  countdownDialog.value.showModal()
+  nextTick(() => countdownNameInput.value?.focus())
+}
+function saveCountdown() {
+  if (!countdownDraft.value.name.trim() || !countdownDraft.value.date) return
+  const data = { ...countdownDraft.value, name: countdownDraft.value.name.trim(), note: countdownDraft.value.note.trim() }
+  if (editingCountdownId.value) Object.assign(countdowns.value.find(item => item.id === editingCountdownId.value), data)
+  else countdowns.value.push({ id: makeId(), ...data, createdAt: Date.now() })
+  countdownDialog.value.close(); showToast(editingCountdownId.value ? '倒计时已更新' : '新的目标倒计时已保存')
+}
+function deleteCountdown(id) { if (confirm('删除这个目标倒计时吗？')) countdowns.value = countdowns.value.filter(item => item.id !== id) }
+function daysUntil(date) {
+  const target = new Date(`${date}T00:00:00`), base = new Date(`${today.value}T00:00:00`)
+  return Math.round((target - base) / 86400000)
+}
+function countdownText(item) {
+  const days = daysUntil(item.date)
+  return days === 0 ? '就是今天' : days > 0 ? `还有 ${days} 天` : `已过去 ${Math.abs(days)} 天`
+}
+const sortedCountdowns = computed(() => [...countdowns.value].sort((a, b) => daysUntil(a.date) - daysUntil(b.date)))
+const activeCountdowns = computed(() => sortedCountdowns.value.filter(item => daysUntil(item.date) >= 0))
 
 const toast = ref('')
 let toastTimer
@@ -112,7 +143,10 @@ const planDialog = ref(null)
 const planNameInput = ref(null)
 const planDraft = ref({ phase: '第1阶段', type: '', name: '', status: '待开始', start: today.value, end: today.value, progress: 0, progressText: '0/100' })
 const planStatuses = ['待开始', '进行中', '已完成', '暂时搁置']
-const sortedPlans = computed(() => plans.value)
+const planTypeFilter = ref('全部')
+const planTypes = computed(() => [...new Set(plans.value.map(plan => String(plan.type || '').trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'zh-CN')))
+const sortedPlans = computed(() => planTypeFilter.value === '全部' ? plans.value : plans.value.filter(plan => String(plan.type || '').trim() === planTypeFilter.value))
+watch(planTypes, types => { if (planTypeFilter.value !== '全部' && !types.includes(planTypeFilter.value)) planTypeFilter.value = '全部' })
 const completedPlans = computed(() => plans.value.filter(x => x.status === '已完成').length)
 const overallPlanProgress = computed(() => plans.value.length ? Math.round(plans.value.reduce((s, x) => s + Number(x.progress || 0), 0) / plans.value.length) : 0)
 function openPlan() {
@@ -323,12 +357,13 @@ onBeforeUnmount(() => {
       <div class="side-quote"><small>今日一句 · 每日更新</small><p>{{ dailyQuote[0] }}</p></div>
     </aside>
     <main>
-      <header class="topbar"><div><p class="eyebrow">{{ pageMeta[page][0] }}</p><h1>{{ pageMeta[page][1] }}</h1></div><button v-if="page !== 'focus' && page !== 'ledger' && page !== 'insights'" class="primary" @click="page === 'roadmap' ? openPlan() : openTask()">{{ page === 'roadmap' ? '＋ 添加阶段' : '＋ 新建任务' }}</button></header>
+      <header class="topbar"><div><p class="eyebrow">{{ pageMeta[page][0] }}</p><h1>{{ pageMeta[page][1] }}</h1></div><button v-if="!['focus','ledger','insights'].includes(page)" class="primary" @click="page === 'roadmap' ? openPlan() : page === 'countdown' ? openCountdown() : openTask()">{{ page === 'roadmap' ? '＋ 添加阶段' : page === 'countdown' ? '＋ 新倒计时' : '＋ 新建任务' }}</button></header>
 
       <section v-if="page === 'home'">
         <div class="grid hero-grid"><article class="card focus-hero"><p class="eyebrow">今日专注</p><h2>把时间留给重要的事</h2><strong class="hero-time">{{ timerDisplay }}</strong><button class="round-play" @click="page = 'focus'">▶</button></article><article class="card quote-card"><small>DAILY WORDS · 每日更新</small><p>“{{ dailyQuote[0] }}”</p><span>{{ dailyQuote[1] }}</span></article></div>
         <div class="grid stats"><article class="card stat"><span>今日专注</span><strong>{{ focusData.minutes }}<small> 分钟</small></strong></article><article class="card stat"><span>待办任务</span><strong>{{ todayTasks.filter(t => !t.done).length }}<small> 项</small></strong></article><article class="card stat"><span>本月结余</span><strong>{{ moneyText(monthBalance) }}</strong></article></div>
         <div class="grid content-grid"><article class="card"><div class="card-head"><h2>今天的正式任务</h2><button class="text-btn" @click="page = 'calendar'">查看日历 →</button></div><div v-if="todayTasks.length" class="item-list"><div v-for="task in todayTasks" :key="task.id" class="item"><button class="check" :class="{ checked: task.done }" @click="toggleTask(task.id)">✓</button><div :class="['item-main', { done: task.done }]"><strong>{{ task.name }}</strong><small>{{ task.time || '全天' }}</small></div><span class="tag">{{ task.cat }}</span><button class="delete" @click="deleteTask(task.id)">×</button></div></div><div v-else class="empty">今天没有正式任务，随手想法可以写在速记里。</div></article><article class="card"><h2>最近的时间记录</h2><div v-if="recentLogs.length" class="item-list"><div v-for="log in recentLogs" :key="log.id" class="item"><span class="dot"></span><div class="item-main"><strong>{{ log.name }}</strong><small>{{ log.cat }} · {{ log.date }}</small></div><b>{{ log.duration }} 分钟</b></div></div><div v-else class="empty">记录后会显示在这里</div></article></div>
+        <article class="card home-countdown"><div class="card-head"><div><p class="eyebrow">UPCOMING DAYS</p><h2>最近的目标</h2></div><button class="text-btn" @click="page = 'countdown'">查看全部 →</button></div><div v-if="activeCountdowns.length" class="home-countdown-list"><button v-for="item in activeCountdowns.slice(0,3)" :key="item.id" class="home-countdown-item" @click="openCountdown(item)"><i :style="{ background: item.color }"></i><span><strong>{{ item.name }}</strong><small>{{ item.date }} · {{ item.note || '把今天的一步，交给未来。' }}</small></span><b>{{ countdownText(item) }}</b></button></div><div v-else class="empty">还没有目标倒计时，给未来写下一件期待的事吧。</div></article>
         <article class="quick-note"><div class="note-accent"></div><div class="note-head"><div><p class="eyebrow">QUICK NOTE</p><h2>今日速记</h2><span>这里不需要格式，想到什么就写什么。</span></div><button class="quiet-btn" @click="clearNote">清空</button></div><textarea v-model="dailyNote" maxlength="2000" placeholder="例如：&#10;· 下午联系小王&#10;· 买牛奶和咖啡豆&#10;· 晚上整理一下本周思路"></textarea><footer><span>{{ new Date().getMonth() + 1 }}月{{ new Date().getDate() }}日</span><span>{{ noteState }} · {{ dailyNote.length }}/2000</span></footer></article>
       </section>
 
@@ -346,16 +381,19 @@ onBeforeUnmount(() => {
 
       <section v-else-if="page === 'calendar'"><div class="calendar-toolbar"><button class="secondary" @click="moveMonth(-1)">←</button><h2>{{ calendarTitle }}</h2><button class="secondary" @click="moveMonth(1)">→</button></div><article class="card calendar-card"><div class="week-head"><span v-for="d in ['周一','周二','周三','周四','周五','周六','周日']">{{ d }}</span></div><div class="calendar-grid"><div v-for="day in calendarDays" :key="day.key" :class="['day', { other: day.other, today: day.today }]" @click="openTask(day.key)"><b>{{ day.number }}</b><div v-for="task in day.tasks.slice(0,3)" :key="task.id" :class="['calendar-event', { done: task.done }]" @click.stop><button class="event-main" :title="task.done ? '点击恢复任务' : '点击完成任务'" @click="toggleTask(task.id)">{{ task.name }}</button><button class="event-edit" title="编辑任务" aria-label="编辑任务" @click="editTask(task.id)">✎</button><button class="event-remove" title="删除任务" aria-label="删除任务" @click="removeCalendarTask(task.id)">×</button></div></div></div></article><p class="calendar-tip">提示：点击任务正文可完成或恢复；点击 ✎ 可编辑、复制或顺延；点击 × 可删除；点击日期空白处可添加。</p></section>
 
+      <section v-else-if="page === 'countdown'" class="countdown-page"><div class="countdown-intro"><div><p class="eyebrow">YOUR IMPORTANT DAYS</p><h2>把期待写给未来</h2><span>考试、旅行、作品提交，任何值得等待的日子都可以被好好记住。</span></div><div class="countdown-spark">✦</div></div><div v-if="sortedCountdowns.length" class="countdown-grid"><article v-for="item in sortedCountdowns" :key="item.id" class="card countdown-card" @click="openCountdown(item)"><div class="countdown-card-top"><span class="countdown-dot" :style="{ background: item.color }"></span><span>{{ item.date }}</span><button class="delete" title="删除倒计时" @click.stop="deleteCountdown(item.id)">×</button></div><h2>{{ item.name }}</h2><strong :class="['countdown-days', { passed: daysUntil(item.date) < 0, today: daysUntil(item.date) === 0 }]">{{ daysUntil(item.date) === 0 ? '今天' : Math.abs(daysUntil(item.date)) }}<small>{{ daysUntil(item.date) === 0 ? '就是目标日' : daysUntil(item.date) > 0 ? '天后' : '天前' }}</small></strong><p>{{ item.note || '把今天的一小步，留给未来的自己。' }}</p><button class="countdown-edit" @click.stop="openCountdown(item)">编辑目标 →</button></article></div><div v-else class="card countdown-empty"><span>☾</span><h3>还没有目标倒计时</h3><p>为一场考试、一次旅行，或者一个想完成的作品，写下日期吧。</p><button class="primary" @click="openCountdown()">创建第一个目标</button></div></section>
+
       <section v-else-if="page === 'roadmap'">
         <div class="grid plan-stats"><article class="plan-overview"><div><p class="eyebrow">YOUR JOURNEY</p><h2>成长不是赶路，是沿途留下坐标。</h2><span>把想抵达的地方，拆成今天可以开始的一小步。</span></div><div class="overall-ring" :style="{ '--value': `${overallPlanProgress * 3.6}deg` }"><strong>{{ overallPlanProgress }}%</strong></div></article><article class="card stat"><span>全部阶段</span><strong>{{ plans.length }}<small> 个</small></strong></article><article class="card stat"><span>已经走过</span><strong>{{ completedPlans }}<small> 个</small></strong></article></div>
         <article class="card roadmap-card">
           <div class="card-head roadmap-head"><div><p class="eyebrow">ROADMAP</p><h2>我的成长路线</h2><span>状态和进度可在表格中直接修改，所有变化都会自动保存。</span></div><button class="secondary" @click="openPlan">＋ 新阶段</button></div>
+          <div class="plan-filters"><span>按类型查看</span><button :class="{ active: planTypeFilter === '全部' }" @click="planTypeFilter = '全部'">全部 <b>{{ plans.length }}</b></button><button v-for="type in planTypes" :key="type" :class="{ active: planTypeFilter === type }" @click="planTypeFilter = type">{{ type }} <b>{{ plans.filter(plan => String(plan.type || '').trim() === type).length }}</b></button><em v-if="!planTypes.length">在表格里填写类型后，会自动生成分类。</em></div>
           <div class="roadmap-scroll">
             <table class="roadmap-table">
               <thead><tr><th>阶段</th><th>类型</th><th>学习 / 成长内容</th><th>状态</th><th>时间安排</th><th>完成量 / 总量</th><th>进度</th><th></th></tr></thead>
               <tbody v-if="sortedPlans.length"><tr v-for="plan in sortedPlans" :key="plan.id" :class="{ completed: plan.status === '已完成' }"><td><span class="phase-number">{{ plan.phase }}</span></td><td><input v-model="plan.type" class="type-input" aria-label="自定义类型" placeholder="填写类型"></td><td><input v-model="plan.name" class="plan-name-input" aria-label="成长内容" placeholder="输入学习或成长内容"></td><td><select v-model="plan.status" :class="['status-select', `status-${plan.status}`]" @change="updatePlanStatus(plan)"><option v-for="status in planStatuses">{{ status }}</option></select></td><td><span class="date-range">{{ plan.start }}<i>→</i>{{ plan.end }}</span></td><td><input v-model="plan.progressText" class="fraction-input" inputmode="decimal" placeholder="例如 173/200" @input="calculatePlanProgress(plan)" @change="calculatePlanProgress(plan)"></td><td><div class="auto-progress"><div><i :style="{ width: `${plan.progress}%` }"></i></div><b>{{ plan.progress }}%</b></div></td><td><button class="delete" @click="deletePlan(plan.id)">×</button></td></tr></tbody>
             </table>
-            <div v-if="!sortedPlans.length" class="roadmap-empty"><span>⌁</span><h3>还没有成长路线</h3><p>先写下第一个想学习、完成或长期坚持的方向。</p><button class="primary" @click="openPlan">添加第一个阶段</button></div>
+            <div v-if="!sortedPlans.length" class="roadmap-empty"><span>⌁</span><h3>{{ planTypeFilter === '全部' ? '还没有成长路线' : '这个分类还没有路线' }}</h3><p>{{ planTypeFilter === '全部' ? '先写下第一个想学习、完成或长期坚持的方向。' : '可以切回“全部”，或添加一个新的成长阶段。' }}</p><button class="primary" @click="planTypeFilter === '全部' ? openPlan() : planTypeFilter = '全部'">{{ planTypeFilter === '全部' ? '添加第一个阶段' : '查看全部路线' }}</button></div>
           </div>
         </article>
       </section>
@@ -374,5 +412,6 @@ onBeforeUnmount(() => {
 
   <dialog ref="taskDialog"><form class="dialog-form" @submit.prevent="saveTask"><div class="dialog-head"><div><p class="eyebrow">{{ editingTaskId ? 'EDIT TASK' : 'NEW TASK' }}</p><h2>{{ editingTaskId ? '编辑正式任务' : '添加正式任务' }}</h2></div><button type="button" class="close" @click="taskDialog.close()">×</button></div><label>任务名称<input ref="taskNameInput" v-model="taskDraft.name" required placeholder="想做什么？"></label><div class="form-row"><label>日期<input v-model="taskDraft.date" type="date" required></label><label>时间（可不填）<input v-model="taskDraft.time" type="time"></label></div><label>分类<select v-model="taskDraft.cat"><option v-for="x in ['工作','学习','生活','运动']">{{ x }}</option></select></label><div v-if="editingTaskId" class="task-quick-actions"><button type="button" class="secondary" @click="copyEditingTask">复制一份</button><button type="button" class="secondary" @click="postponeEditingTask">顺延一天</button></div><div class="dialog-actions"><button type="button" class="secondary" @click="taskDialog.close()">取消</button><button class="primary">{{ editingTaskId ? '保存修改' : '保存任务' }}</button></div></form></dialog>
   <dialog ref="planDialog"><form class="dialog-form" @submit.prevent="savePlan"><div class="dialog-head"><div><p class="eyebrow">NEW MILESTONE</p><h2>添加成长阶段</h2></div><button type="button" class="close" @click="planDialog.close()">×</button></div><div class="form-row"><label>阶段名称 / 序号<input v-model="planDraft.phase" type="text" required placeholder="例如：第一阶段、基础入门"></label><label>自定义类型<input v-model="planDraft.type" type="text" required placeholder="例如：技术线、作品集、长期习惯"></label></div><label>学习 / 成长内容<input ref="planNameInput" v-model="planDraft.name" type="text" required placeholder="例如：完成 Vue 3 系统学习"></label><div class="form-row"><label>开始日期<input v-model="planDraft.start" type="date" required></label><label>结束日期<input v-model="planDraft.end" type="date" :min="planDraft.start" required></label></div><div class="form-row"><label>初始状态<select v-model="planDraft.status"><option v-for="status in planStatuses">{{ status }}</option></select></label><label>完成量 / 总量<input v-model="planDraft.progressText" type="text" inputmode="decimal" required placeholder="例如：173/200" @input="calculatePlanProgress(planDraft)"></label></div><div class="progress-preview"><span>自动计算进度</span><strong>{{ planDraft.progress }}%</strong></div><div class="dialog-actions"><button type="button" class="secondary" @click="planDialog.close()">取消</button><button class="primary">加入成长路线</button></div></form></dialog>
+  <dialog ref="countdownDialog"><form class="dialog-form" @submit.prevent="saveCountdown"><div class="dialog-head"><div><p class="eyebrow">IMPORTANT DAY</p><h2>{{ editingCountdownId ? '编辑目标倒计时' : '添加目标倒计时' }}</h2></div><button type="button" class="close" @click="countdownDialog.close()">×</button></div><label>目标名称<input ref="countdownNameInput" v-model="countdownDraft.name" required placeholder="例如：六级考试、考研、旅行出发"></label><label>目标日期<input v-model="countdownDraft.date" type="date" required></label><label>给未来的一句话<textarea v-model="countdownDraft.note" rows="3" maxlength="120" placeholder="例如：稳稳准备，慢慢靠近"></textarea></label><label>标记颜色<input v-model="countdownDraft.color" type="color" class="color-input"></label><div class="dialog-actions"><button type="button" class="secondary" @click="countdownDialog.close()">取消</button><button class="primary">{{ editingCountdownId ? '保存修改' : '保存倒计时' }}</button></div></form></dialog>
   <Transition name="toast"><div v-if="toast" class="toast"><span>{{ toast }}</span><button v-if="undoVisible" @click="undoDeleteTask">撤销</button></div></Transition>
 </template>
